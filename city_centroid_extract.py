@@ -1,4 +1,5 @@
 #%%
+import imp
 from osgeo import gdal
 from osgeo import ogr
 import os
@@ -6,6 +7,7 @@ import numpy as np
 import csv
 import pandas as pd
 import geopandas as gpd
+from shapely.geometry.point import Point
 
 #%%
 # calculate bonding box from array cordinates to wgs84
@@ -60,7 +62,6 @@ def zonal(raster, vector,res_df):
             attr_list=["UID","country","province","city","pop"]
             for attr in attr_list:
                 res_df.loc[row,attr]=vector.loc[row,attr]
-            print("begin prepare")
             # prepare for calculate max point position
             offsets = boundingBoxToOffsets(tmp_feature.GetGeometryRef().GetEnvelope(),\
             geot)  # get the bounding box of the polygon feature and convert the coordinates to cell offsets
@@ -88,9 +89,11 @@ def zonal(raster, vector,res_df):
                 masked_raster_array = np.ma.MaskedArray(\
                 raster_array,\
                 mask=np.logical_or(raster_array==nodata, np.logical_not(mask_array)))
-            print("masked array")
             # calculate max point position
             if masked_raster_array is not None:
+                '''
+                codes to save x and y cordinates into Dataframe.
+                
                 max_pos=np.unravel_index(masked_raster_array.argmax(), masked_raster_array.shape)
                 print((max_pos[1] * new_geot[1]),new_geot[0])
                 max_lat=float(new_geot[0] + (max_pos[1] * new_geot[1]))
@@ -98,6 +101,11 @@ def zonal(raster, vector,res_df):
                 res_df.loc[row,"pos_x"],res_df.loc[row,"pos_y"]=max_lat,max_lon
                 #print(masked_raster_array[max_pos[0]][max_pos[1]])
                 print(max_pos)
+                '''
+                max_pos=np.unravel_index(masked_raster_array.argmax(), masked_raster_array.shape)
+                max_lat=float(new_geot[0] + (max_pos[1] * new_geot[1]))
+                max_lon=float(new_geot[3] + (max_pos[0] * new_geot[5]))
+                res_df.loc[row,"geometry"]=Point(max_lat,max_lon)
     return res_df
 
 
@@ -105,20 +113,23 @@ def zonal(raster, vector,res_df):
 # load raster files
 pop_raster=gdal.Open(r"..\original data\landscan pop\LandScan Global 2015\lspop2015.tif")
 # result file
-res_points=pd.DataFrame(columns=["UID","country","province","city","pop","pos_x","pos_y"])
-
+# res_points=pd.DataFrame(columns=["UID","country","province","city","pop","pos_x","pos_y"])
+res_points=gpd.GeoDataFrame(columns=["UID","country","province","city","pop"],geometry=[])
 # load vector file
 cities=gpd.read_file(r"C:\research\city_architecture\data\original data\population and cities\GADM_level2_wgs84_pop.shp",encoding="utf-8")
 cities
 cities=cities[['UID','NAME_0','NAME_1','NAME_2','pop_sast_4','geometry']]
 cities.rename(columns={"pop_sast_4":"pop","NAME_0":"country","NAME_1":"province","NAME_2":"city"},inplace=True)
-print(cities)
 cities_over100K=cities[cities['pop']>=100000]
 cities_over100K.reset_index(drop=True,inplace=True)
 # %%
-
 zonal(pop_raster,cities_over100K,res_points)
 print(res_points)
 # %%
-res_points.to_csv("city_points.csv")
+res_points=res_points.astype({"UID":int,"pop":float})
+res_points.to_file('city_centroids.gpkg', driver='GPKG',encoding='utf-8')
+
 # %%
+# file types geopandas can save, and their corresponding "driver" argument.
+import fiona
+fiona.supported_drivers
